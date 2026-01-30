@@ -21,8 +21,12 @@ logrotate /etc/logrotate.d/acestream-services --debug
 
 # Initialize WARP if enabled
 if [ "${ENABLE_WARP}" = "true" ]; then
-    echo "Initializing Cloudflare WARP..."
-    /app/warp-setup.sh
+    if ! command -v warp-cli &> /dev/null; then
+        echo "WARNING: Cloudflare WARP is enabled but 'warp-cli' command was not found (likely skipped during build on ARM). Skipping WARP setup."
+    else
+        echo "Initializing Cloudflare WARP..."
+        /app/warp-setup.sh
+    fi
 fi
 
 # Set ENABLE_ACESTREAM_ENGINE to match ENABLE_ACEXY if not explicitly set
@@ -66,13 +70,17 @@ fi
 
 # Start Acestream Engine if enabled
 if [ "$ENABLE_ACESTREAM_ENGINE" = "true" ]; then
-    echo "Starting Acestream engine..."
-    if [ "$ALLOW_REMOTE_ACCESS" = "yes" ]; then
-        EXTRA_FLAGS="$EXTRA_FLAGS --bind-all"
+    if [ ! -f "/opt/acestream/start-engine" ]; then
+        echo "WARNING: Acestream Engine is enabled but the binary was not found at /opt/acestream/start-engine. It was likely skipped during build due to architecture incompatibility. Skipping engine start."
+    else
+        echo "Starting Acestream engine..."
+        if [ "$ALLOW_REMOTE_ACCESS" = "yes" ]; then
+            EXTRA_FLAGS="$EXTRA_FLAGS --bind-all"
+        fi
+        /opt/acestream/start-engine --client-console --http-port $ACESTREAM_HTTP_PORT $EXTRA_FLAGS >> "$LOG_DIR/acestream.log" 2>&1 &
+        sleep 3 # Brief pause to allow Acestream engine to start
+        echo "Acestream engine logs available at $LOG_DIR/acestream.log"
     fi
-    /opt/acestream/start-engine --client-console --http-port $ACESTREAM_HTTP_PORT $EXTRA_FLAGS >> "$LOG_DIR/acestream.log" 2>&1 &  
-    sleep 3 # Brief pause to allow Acestream engine to start
-    echo "Acestream engine logs available at $LOG_DIR/acestream.log"
 fi
 
 # Start Acexy if enabled

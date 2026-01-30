@@ -8,6 +8,9 @@ RUN git clone https://github.com/Javinator9889/acexy.git . && \
 # Create base image with all dependencies
 FROM python:3.10-slim AS base
 
+# Detect architecture (amd64 or arm64)
+ARG TARGETARCH
+
 # Add metadata labels
 LABEL maintainer="pipepito" \
       description="Base image for Acestream channel scraper" \
@@ -27,6 +30,9 @@ RUN apt-get update && apt-get install -y \
     gcc \
     python3-dev \
     build-essential \
+    libffi-dev \
+    libssl-dev \
+    libgmp-dev \
     tor
 
 # Add TOR configuration
@@ -63,43 +69,51 @@ RUN mkdir -p ZeroNet && \
 ENV ACESTREAM_VERSION="3.2.3_ubuntu_22.04_x86_64_py3.10"
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Install acestream dependencies
-RUN apt-get update \
-  && apt-get install --no-install-recommends -y \
-      python3.10 ca-certificates wget sudo \
-  && rm -rf /var/lib/apt/lists/* \
-  #
-  # Download acestream
-  && wget --progress=dot:giga "https://download.acestream.media/linux/acestream_${ACESTREAM_VERSION}.tar.gz" \
-  && mkdir acestream \
-  && tar zxf "acestream_${ACESTREAM_VERSION}.tar.gz" -C acestream \
-  && rm "acestream_${ACESTREAM_VERSION}.tar.gz" \
-  && mv acestream /opt/acestream \
-  && pushd /opt/acestream || exit \
-  && bash ./install_dependencies.sh \
-  && popd || exit
+# Install acestream dependencies (ONLY for amd64)
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+      apt-get update \
+      && apt-get install --no-install-recommends -y \
+          python3.10 ca-certificates wget sudo \
+      && rm -rf /var/lib/apt/lists/* \
+      # \
+      # Download acestream \
+      && wget --progress=dot:giga "https://download.acestream.media/linux/acestream_${ACESTREAM_VERSION}.tar.gz" \
+      && mkdir acestream \
+      && tar zxf "acestream_${ACESTREAM_VERSION}.tar.gz" -C acestream \
+      && rm "acestream_${ACESTREAM_VERSION}.tar.gz" \
+      && mv acestream /opt/acestream \
+      && pushd /opt/acestream || exit \
+      && bash ./install_dependencies.sh \
+      && popd || exit; \
+    else \
+      echo "WARNING: Acestream Engine is not supported on ${TARGETARCH}. Skipping installation."; \
+    fi
 
 # Copy the acexy binary from the builder stage
 COPY --from=acexy-builder /acexy /usr/local/bin/acexy
 RUN chmod +x /usr/local/bin/acexy
 
-# Install Cloudflare WARP dependencies
-RUN apt-get update && apt-get install -y \
-    apt-transport-https \
-    gnupg \
-    curl \
-    lsb-release \
-    dirmngr \
-    ca-certificates \
-    --no-install-recommends
-
-# Add Cloudflare GPG key and repository
-RUN curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg \
-    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/cloudflare-client.list
-
-# Install Cloudflare WARP
-RUN apt-get update && apt-get install -y cloudflare-warp \
-    && rm -rf /var/lib/apt/lists/*
+# Install Cloudflare WARP dependencies and package (ONLY for amd64)
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+      apt-get update && apt-get install -y \
+        apt-transport-https \
+        gnupg \
+        curl \
+        lsb-release \
+        dirmngr \
+        ca-certificates \
+        --no-install-recommends \
+      # \
+      # Add Cloudflare GPG key and repository \
+      && curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg \
+      && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/cloudflare-client.list \
+      # \
+      # Install Cloudflare WARP \
+      && apt-get update && apt-get install -y cloudflare-warp \
+      && rm -rf /var/lib/apt/lists/*; \
+    else \
+      echo "WARNING: Cloudflare WARP is not supported on ${TARGETARCH} or explicitly disabled for ARM. Skipping installation."; \
+    fi
 
 # Clean up APT in base image
 RUN apt-get clean && \
