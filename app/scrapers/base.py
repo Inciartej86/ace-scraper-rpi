@@ -98,6 +98,30 @@ class BaseScraper(ABC):
                 except json.JSONDecodeError as e:
                     logger.error(f"Error parsing JSON from script tag: {e}")
 
+        # Try to find 'const links = [...]' pattern (Array of objects)
+        if not channels:
+            for script in soup.find_all('script'):
+                if script.string and 'const links =' in script.string:
+                    # Look for const links = [...];
+                    # Use regex to capture the array. Matches "const links = " followed by array
+                    match = re.search(r'const links\s*=\s*(\[.*?\]);', script.string, re.DOTALL)
+                    if match:
+                        try:
+                            json_str = match.group(1)
+                            links_data = json.loads(json_str)
+                            for link in links_data:
+                                url = link.get('url', '')
+                                if 'acestream://' in url:
+                                    channel_id = url.split('acestream://')[1]
+                                    name = link.get('name', '')
+                                    # Clean the channel name
+                                    name = self.clean_channel_name(name)
+                                    if channel_id and channel_id not in self.identified_ids:
+                                        channels.append((channel_id, name))
+                                        self.identified_ids.add(channel_id)
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Error parsing JSON array from script tag: {e}")
+
         return channels
 
     def extract_from_content(self, soup: BeautifulSoup) -> List[Tuple[str, str]]:
